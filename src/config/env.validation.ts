@@ -20,4 +20,8 @@ export const envValidationSchema = Joi.object({
   ADMIN_URL: Joi.string()
     .uri()
     .default('http://localhost:3001'),
+
+  MONGODB_URI: Joi.string()
+    .uri({ scheme: ['mongodb', 'mongodb+srv'] })
+    .required(),
 });
