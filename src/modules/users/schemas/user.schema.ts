@@ -1,3 +1,4 @@
+
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 
@@ -12,6 +13,7 @@ export type UserDocument = HydratedDocument<User>;
 })
 export class User {
   @Prop({
+    type: String,
     required: true,
     unique: true,
     index: true,
@@ -20,6 +22,7 @@ export class User {
   phone: string;
 
   @Prop({
+    type: String,
     trim: true,
     maxlength: 100,
     default: null,
@@ -27,6 +30,7 @@ export class User {
   name: string | null;
 
   @Prop({
+    type: Boolean,
     default: false,
   })
   isPhoneVerified: boolean;
@@ -46,6 +50,7 @@ export class User {
   status: UserStatus;
 
   @Prop({
+    type: Date,
     default: null,
   })
   lastLoginAt: Date | null;
