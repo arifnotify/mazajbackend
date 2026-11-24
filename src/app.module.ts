@@ -12,6 +12,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { envValidationSchema } from './config/env.validation';
 import { UsersModule } from './modules/users/users.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { UsersModule } from './modules/users/users.module';
 
     // Users Module
     UsersModule,
+    AuthModule,
   ],
 
   controllers: [AppController],
