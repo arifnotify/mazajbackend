@@ -1,8 +1,8 @@
-
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { APP_GUARD } from '@nestjs/core';
+
 import {
   ThrottlerModule,
   ThrottlerGuard,
@@ -11,6 +11,7 @@ import {
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { envValidationSchema } from './config/env.validation';
+import { UsersModule } from './modules/users/users.module';
 
 @Module({
   imports: [
@@ -38,6 +39,9 @@ import { envValidationSchema } from './config/env.validation';
         serverSelectionTimeoutMS: 10000,
       }),
     }),
+
+    // Users Module
+    UsersModule,
   ],
 
   controllers: [AppController],
@@ -45,7 +49,7 @@ import { envValidationSchema } from './config/env.validation';
   providers: [
     AppService,
 
-    // Apply Rate Limiting Globally
+    // Global Rate Limiting
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
