@@ -6,15 +6,29 @@ import {
 } from '@nestjs/common';
 
 import { InjectModel } from '@nestjs/mongoose';
+
 import { Model } from 'mongoose';
 
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 
 import * as bcrypt from 'bcrypt';
-import { randomInt } from 'crypto';
 
-import { Otp, OtpDocument } from './schemas/otp.schema';
+import {
+  randomBytes,
+  randomInt,
+  randomUUID,
+} from 'crypto';
+
+import {
+  Otp,
+  OtpDocument,
+} from './schemas/otp.schema';
+
+import {
+  RefreshToken,
+  RefreshTokenDocument,
+} from './schemas/refresh-token.schema';
 
 import { UsersService } from '../users/users.service';
 
@@ -22,9 +36,14 @@ import { UserStatus } from '../../shared/enums/user-status.enum';
 
 @Injectable()
 export class AuthService {
+  private readonly refreshTokenDays = 30;
+
   constructor(
     @InjectModel(Otp.name)
     private readonly otpModel: Model<OtpDocument>,
+
+    @InjectModel(RefreshToken.name)
+    private readonly refreshTokenModel: Model<RefreshTokenDocument>,
 
     private readonly usersService: UsersService,
 
@@ -33,24 +52,66 @@ export class AuthService {
     private readonly configService: ConfigService,
   ) {}
 
+  // Generate Access + Refresh Tokens
+  private async generateTokens(user: any) {
+    const payload = {
+      sub: user._id.toString(),
+      phone: user.phone,
+      role: user.role,
+    };
+
+    const accessToken = await this.jwtService.signAsync(
+      payload,
+    );
+
+    const tokenId = randomUUID();
+
+    const tokenSecret = randomBytes(64).toString('hex');
+
+    const refreshToken = `${tokenId}.${tokenSecret}`;
+
+    const tokenHash = await bcrypt.hash(
+      tokenSecret,
+      10,
+    );
+
+    const expiresAt = new Date(
+      Date.now() +
+        this.refreshTokenDays * 24 * 60 * 60 * 1000,
+    );
+
+    await this.refreshTokenModel.create({
+      userId: user._id,
+      tokenId,
+      tokenHash,
+      expiresAt,
+    });
+
+    return {
+      accessToken,
+      refreshToken,
+      tokenType: 'Bearer',
+      expiresIn: 900,
+      refreshExpiresIn:
+        this.refreshTokenDays * 24 * 60 * 60,
+    };
+  }
+
+  // Request OTP
   async requestOtp(phone: string) {
     const environment =
       this.configService.get<string>('NODE_ENV');
 
-    // Development OTP must never run in production.
     if (environment === 'production') {
       throw new ServiceUnavailableException(
         'Production SMS provider is not configured yet',
       );
     }
 
-    // Remove previous OTP.
     await this.otpModel.deleteMany({ phone }).exec();
 
-    // Generate 6 digit OTP.
     const otp = randomInt(100000, 1000000).toString();
 
-    // Hash OTP before database storage.
     const otpHash = await bcrypt.hash(otp, 10);
 
     const ttlMinutes = Number(
@@ -76,6 +137,7 @@ export class AuthService {
     };
   }
 
+  // Verify OTP and Login
   async verifyOtp(phone: string, otp: string) {
     const otpRecord = await this.otpModel
       .findOne({ phone })
@@ -122,12 +184,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid OTP');
     }
 
-    // OTP successfully verified.
     await otpRecord.deleteOne();
 
     let user = await this.usersService.findByPhone(phone);
 
-    // Create new customer if not found.
     if (!user) {
       user = await this.usersService.createUser(phone);
     }
@@ -143,23 +203,13 @@ export class AuthService {
 
     await user.save();
 
-    const payload = {
-      sub: user._id.toString(),
-      phone: user.phone,
-      role: user.role,
-    };
-
-    const accessToken = await this.jwtService.signAsync(
-      payload,
-    );
+    const tokens = await this.generateTokens(user);
 
     return {
       success: true,
       message: 'Login successful',
       data: {
-        accessToken,
-        tokenType: 'Bearer',
-        expiresIn: 900,
+        ...tokens,
         user: {
           id: user._id.toString(),
           phone: user.phone,
@@ -168,6 +218,126 @@ export class AuthService {
           isPhoneVerified: user.isPhoneVerified,
         },
       },
+    };
+  }
+
+  // Refresh Access Token and Rotate Refresh Token
+  async refreshTokens(refreshToken: string) {
+    const parts = refreshToken.split('.');
+
+    if (parts.length !== 2) {
+      throw new UnauthorizedException(
+        'Invalid refresh token',
+      );
+    }
+
+    const [tokenId, tokenSecret] = parts;
+
+    const tokenRecord = await this.refreshTokenModel
+      .findOne({ tokenId })
+      .exec();
+
+    if (!tokenRecord) {
+      throw new UnauthorizedException(
+        'Refresh token expired or revoked',
+      );
+    }
+
+    if (tokenRecord.expiresAt.getTime() <= Date.now()) {
+      await tokenRecord.deleteOne();
+
+      throw new UnauthorizedException(
+        'Refresh token expired',
+      );
+    }
+
+    const isValid = await bcrypt.compare(
+      tokenSecret,
+      tokenRecord.tokenHash,
+    );
+
+    if (!isValid) {
+      throw new UnauthorizedException(
+        'Invalid refresh token',
+      );
+    }
+
+    const user = await this.usersService.findById(
+      tokenRecord.userId.toString(),
+    );
+
+    if (!user || user.status === UserStatus.BLOCKED) {
+      await tokenRecord.deleteOne();
+
+      throw new UnauthorizedException(
+        'User account is unavailable',
+      );
+    }
+
+    // Atomically consume the old token.
+    const consumed = await this.refreshTokenModel
+      .findOneAndDelete({
+        _id: tokenRecord._id,
+      })
+      .exec();
+
+    if (!consumed) {
+      throw new UnauthorizedException(
+        'Refresh token has already been used',
+      );
+    }
+
+    const tokens = await this.generateTokens(user);
+
+    return {
+      success: true,
+      message: 'Token refreshed successfully',
+      data: tokens,
+    };
+  }
+
+  // Logout Current Device
+  async logout(refreshToken: string) {
+    const parts = refreshToken.split('.');
+
+    if (parts.length !== 2) {
+      throw new UnauthorizedException(
+        'Invalid refresh token',
+      );
+    }
+
+    const [tokenId, tokenSecret] = parts;
+
+    const tokenRecord = await this.refreshTokenModel
+      .findOne({ tokenId })
+      .exec();
+
+    if (!tokenRecord) {
+      throw new UnauthorizedException(
+        'Refresh token already revoked or expired',
+      );
+    }
+
+    const isValid = await bcrypt.compare(
+      tokenSecret,
+      tokenRecord.tokenHash,
+    );
+
+    if (!isValid) {
+      throw new UnauthorizedException(
+        'Invalid refresh token',
+      );
+    }
+
+    await this.refreshTokenModel
+      .findOneAndDelete({
+        _id: tokenRecord._id,
+      })
+      .exec();
+
+    return {
+      success: true,
+      message: 'Logout successful',
     };
   }
 }
