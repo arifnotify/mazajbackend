@@ -1,13 +1,17 @@
+
 import { Module } from '@nestjs/common';
 
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { JwtModule } from '@nestjs/jwt';
+import { PassportModule } from '@nestjs/passport';
 
 import { MongooseModule } from '@nestjs/mongoose';
 
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+
+import { JwtStrategy } from './strategies/jwt.strategy';
 
 import { Otp, OtpSchema } from './schemas/otp.schema';
 
@@ -19,6 +23,12 @@ import { UsersModule } from '../users/users.module';
 
     UsersModule,
 
+    // Passport JWT Authentication
+    PassportModule.register({
+      defaultStrategy: 'jwt',
+    }),
+
+    // OTP Database Schema
     MongooseModule.forFeature([
       {
         name: Otp.name,
@@ -26,6 +36,7 @@ import { UsersModule } from '../users/users.module';
       },
     ]),
 
+    // JWT Configuration
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -44,8 +55,15 @@ import { UsersModule } from '../users/users.module';
 
   controllers: [AuthController],
 
-  providers: [AuthService],
+  providers: [
+    AuthService,
+    JwtStrategy,
+  ],
 
-  exports: [AuthService],
+  exports: [
+    AuthService,
+    JwtModule,
+    PassportModule,
+  ],
 })
 export class AuthModule {}

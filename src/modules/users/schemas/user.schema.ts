@@ -54,6 +54,11 @@ export class User {
     default: null,
   })
   lastLoginAt: Date | null;
+
+  // Timestamp fields
+  createdAt: Date;
+
+  updatedAt: Date;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
