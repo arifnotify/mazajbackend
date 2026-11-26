@@ -27,6 +27,10 @@ export const envValidationSchema = Joi.object({
   JWT_ACCESS_SECRET: Joi.string()
     .min(32)
     .required(),
+  
+  ADMIN_SETUP_KEY: Joi.string()
+  .min(32)
+  .optional(),
 
   OTP_PROVIDER: Joi.string()
     .valid('development')
